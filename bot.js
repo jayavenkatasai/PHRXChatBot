@@ -1,33 +1,44 @@
-
-
 const { ActivityHandler, MessageFactory } = require('botbuilder');
 const { KnowOrderStatusDialog } = require('./componentDialogs/makeReservationDialog');
 
+// Import or require your LUIS/CLU client (or custom module) and QnA Maker client.
+// For this example we will assume you have created a helper file `luisRecognizer.js` and `qnaMakerClient.js`.
+const { LuisRecognizer } = require('botbuilder-ai');
+
+const { QnAMaker } = require('botbuilder-ai');
+const {getCluPrediction} = require('./cluhelpers/cluhelper');
 class EchoBot extends ActivityHandler {
-    constructor(conversationState, userState) {
+    constructor(conversationState, userState, luisApplication, luisPredictionOptions, qnaMakerOptions) {
         super();
 
         this.conversationState = conversationState;
         this.userState = userState;
         this.dialogState = conversationState.createProperty('DialogState');
+
+        // Instantiate your dialogs.
         this.KnowOrderStatusDialog = new KnowOrderStatusDialog(this.conversationState, this.userState);
+
+        // Suggested actions state
         this.previousIntent = this.conversationState.createProperty('previousIntent');
         this.conversationData = this.conversationState.createProperty('conservationData');
 
-        // On each message, decide the intent and act accordingly.
+        // Create a LUIS recognizer instance.
+      //  this.luisRecognizer = new CLURecognizer(luisApplication, luisPredictionOptions, true);
+
+        // Create a QnA Maker instance.
+        this.qnaMaker = new QnAMaker(qnaMakerOptions);
+
         this.onMessage(async (context, next) => {
             await this.dispatchToIntentAsync(context);
             await next();
         });
 
-        // Save state changes on each turn.
         this.onDialog(async (context, next) => {
             await this.conversationState.saveChanges(context, false);
             await this.userState.saveChanges(context, false);
             await next();
         });
 
-        // Welcome message and suggestions for new members.
         this.onMembersAdded(async (context, next) => {
             await this.sendWelcomeMessage(context);
             await next();
@@ -38,69 +49,77 @@ class EchoBot extends ActivityHandler {
         const { activity } = turnContext;
         for (let cnt in activity.membersAdded) {
             if (activity.membersAdded[cnt].id !== activity.recipient.id) {
-                const WelcomeMessage = `Welcome to Phrx chat, ${activity.membersAdded[cnt].name}`;
-                await turnContext.sendActivity(WelcomeMessage);
+                const welcomeMessage = `Welcome to Phrx chat, ${activity.membersAdded[cnt].name}`;
+                await turnContext.sendActivity(welcomeMessage);
                 await this.sendSuggestedActions(turnContext);
             }
         }
     }
 
-    // This sends suggested action buttons to the user.
     async sendSuggestedActions(turnContext) {
         const reply = MessageFactory.suggestedActions(
-            ['Know about Phrx chat', 'Know about my order', 'Talk To Agent'],
+            ['I want to know my order status', 'Ask a FAQ', 'Talk To Agent'],
             'What would you like to do today?'
         );
         await turnContext.sendActivity(reply);
     }
 
-    // Dispatch the incoming message to appropriate functionality.
+    // Call LUIS to get the top intent.
+    async extractIntent(context) {
+        const luisResult = await this.luisRecognizer.recognize(context);
+        // The top intent property is a string e.g., "OrderStatus" or "FAQ"
+        const topIntent = LuisRecognizer.topIntent(luisResult, 'None', 0.5);
+        return { topIntent, luisResult };
+    }
+
     async dispatchToIntentAsync(context) {
-        const previousIntent = await this.previousIntent.get(context, {});
-        const conversationData = await this.conversationData.get(context, {});
+        // We call our LUIS recognizer to understand the intent.
+        // Call the CLU prediction endpoint using our helper
+        console.log(context)
+        const cluResult = await getCluPrediction(context.activity.text);
+        console.log("CLU Prediction Result:", JSON.stringify(cluResult, null, 2));
 
-        let currentIntent;
-        if (previousIntent.intentName && conversationData.endDialog === false) {
-            // Continuing a dialog
-            currentIntent = previousIntent.intentName;
-        } else if (previousIntent.intentName && conversationData.endDialog === true) {
-            // Start of a new conversation after finishing a dialog
-            currentIntent = context.activity.text;
-            // Reset the conversationData flag for next round.
-            await this.conversationData.set(context, { endDialog: false });
-        } else {
-            // First time message. Save the intent.
-            currentIntent = context.activity.text;
-            await this.previousIntent.set(context, { intentName: context.activity.text });
-        }
+        // Extract the top intent from the prediction result
+        const topIntent = cluResult?.result?.prediction?. topIntent || "None";
+        console.log(`Top Intent: ${topIntent}`); //OrderStatus
 
-        // Get the text to decide action
-        switch (currentIntent) {
-            case 'Know about my order':
-                console.log("Inside 'Know about my order'");
+        // Depending on the detected intent, call the appropriate flow.
+        switch (topIntent) {
+            case 'OrderStatus':
+                console.log("Detected OrderStatus intent.");
                 await this.conversationData.set(context, { endDialog: false });
                 await this.KnowOrderStatusDialog.run(context, this.dialogState);
-                // When the dialog finishes, update our flag.
-                const isComplete = await this.KnowOrderStatusDialog.isDialogComplete();
-                await this.conversationData.set(context, { endDialog: isComplete });
-                if (isComplete) {
-                    // Once the dialog is complete, show suggestions again.
+                // When the dialog finishes, re-show suggestions.
+                if (await this.KnowOrderStatusDialog.isDialogComplete()) {
                     await this.sendSuggestedActions(context);
                 }
                 break;
-            case 'Know about Phrx chat':
-                await this.sendPhrxChatInfo(context);
+            case 'FAQ':
+                console.log("Detected FAQ intent.");
+                // Forward the user’s question to QnA Maker
+                const qnaResults = await this.qnaMaker.getAnswers(context);
+                if (qnaResults && qnaResults.length > 0) {
+                    await context.sendActivity(qnaResults[0].answer);
+                } else {
+                    await context.sendActivity("I'm sorry, I don't have an answer to that question.");
+                }
+                await this.sendSuggestedActions(context);
                 break;
-            case 'Talk To Agent':
+            case 'AgentRequest':
+                console.log("Detected AgentRequest intent.");
+                // Send a random agent info text.
                 await this.sendAgentInfo(context);
                 break;
+            case 'None':
             default:
-                await this.sendWelcomeMessage(context);
+                // If no intent is recognized, or it is None, fallback to a default welcome message.
+                await context.sendActivity("I'm sorry, I didn't understand that. Let me help you. Choose one of the options below.");
+                await this.sendSuggestedActions(context);
                 break;
         }
     }
 
-    // This function returns a random informational text about Phrx chat and then shows suggestions.
+    // Send a random phrx chat info text.
     async sendPhrxChatInfo(context) {
         const phrxTexts = [
             "Phrx chat is a smart assistant designed to help you with your queries.",
@@ -109,11 +128,10 @@ class EchoBot extends ActivityHandler {
         ];
         const randomText = phrxTexts[Math.floor(Math.random() * phrxTexts.length)];
         await context.sendActivity(randomText);
-        // Ask for further suggestions.
         await this.sendSuggestedActions(context);
     }
 
-    // This function returns a random agent information text and then shows suggestions.
+    // Send a random agent info text.
     async sendAgentInfo(context) {
         const agentTexts = [
             "An agent will be with you shortly to assist with your needs.",
@@ -122,7 +140,6 @@ class EchoBot extends ActivityHandler {
         ];
         const randomText = agentTexts[Math.floor(Math.random() * agentTexts.length)];
         await context.sendActivity(randomText);
-        // Ask for further suggestions.
         await this.sendSuggestedActions(context);
     }
 }
