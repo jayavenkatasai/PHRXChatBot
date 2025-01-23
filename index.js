@@ -108,7 +108,7 @@ const {
     CloudAdapter,
     ConfigurationServiceClientCredentialFactory,
     createBotFrameworkAuthenticationFromConfiguration,
-    MemoryStorage,
+    MemoryStorage,//
     ConversationState,
     UserState
 } = require('botbuilder');
