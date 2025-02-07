@@ -11,6 +11,15 @@ const EMAIL_PROMPT = 'EMAIL_PROMPT';
 const NAME_PROMPT = 'NAME_PROMPT';
 const WATERFALL_DIALOG = 'WATERFALL_DIALOG';
 const FALLBACK_PROMPT = 'FALLBACK_PROMPT';
+const { MessageFactory } = require('botbuilder');
+
+async function sendSuggestedActions(context) {
+    const reply = MessageFactory.suggestedActions(
+        ['I want to know my order status', 'Live chat'],
+        'What would you like to do today?'
+    );
+    await context.sendActivity(reply);
+}
 
 const SWITCH_INTENT_COMMANDS = ['cancel', 'help', 'switch to faq', 'talk to agent'];
 
@@ -29,8 +38,8 @@ class KnowOrderStatusDialog extends ComponentDialog {
 
         // Define the waterfall steps
         this.addDialog(new WaterfallDialog(WATERFALL_DIALOG, [
-            this.firstStep.bind(this),
-            this.getName.bind(this),
+            // this.firstStep.bind(this),
+            // this.getName.bind(this),
             this.getEmail.bind(this),
             this.summaryStep.bind(this)
         ]));
@@ -90,7 +99,6 @@ class KnowOrderStatusDialog extends ComponentDialog {
 
     async getEmail(step) {
         console.log("get email step");
-        step.values.name = step.result;
         return await step.prompt(EMAIL_PROMPT, 'What is your Email? (e.g., user@example.com)');
     }
 
@@ -103,6 +111,7 @@ class KnowOrderStatusDialog extends ComponentDialog {
             switch (command) {
                 case 'cancel':
                     await step.context.sendActivity("Order status tracking has been canceled.");
+                    await sendSuggestedActions(step.context);
                     return await step.endDialog();
                 case 'help':
                     await step.context.sendActivity("You can track your order by providing your name and email.");
@@ -125,8 +134,14 @@ class KnowOrderStatusDialog extends ComponentDialog {
                 // Assuming you want to display all orders
                 let ordersInfo = "I found the following orders:\n";
                 orderStatus.forEach(order => {
-                    ordersInfo += `- Order ID: ${order.orderId}, Status: ${order.status}\n`;
+                    if(order.tracking_number=="" || order.status=="cancelled"){
+                        ordersInfo += `- Order ID: ${order.orderId}\n- Status: ${order.status == "out_for_delivery" ? "Shipped" : order.status }`; 
+                    }else{
+                        ordersInfo += `- Order ID: ${order.orderId}\n- Status: ${order.status == "out_for_delivery" ? "Shipped" : order.status }\n- TrackingNumber : ${order.tracking_number}\n - TrackingUrl : [Order Status](https://www.fedex.com/apps/fedextrack/?tracknumbers=${order.tracking_number})
+                        `;
+                    }
                 });
+
                 await step.context.sendActivity(ordersInfo);
             } else {
                 await step.context.sendActivity("Currently, you don't have any orders placed.");
@@ -134,42 +149,79 @@ class KnowOrderStatusDialog extends ComponentDialog {
         } catch (error) {
             await step.context.sendActivity("We're experiencing technical issues retrieving your order status. Please try again later.");
         }
+        await sendSuggestedActions(step.context);
 
         // End the dialog after displaying order status or informing no orders
         return await step.endDialog();
     }
 
+    // async emailValidator(promptContext) {
+    //     const email = promptContext.recognized.value;
+    //     console.log("Validating email:", email);
+    //     // Check for cancellation
+    //     if (email.toLowerCase() === 'cancel') {
+    //         await promptContext.context.sendActivity("Order status tracking has been canceled.");
+    //         return false; // End dialog
+    //     }
+
+    //     // First, validate the email format
+    //     if (!validator.isEmail(email)) {
+    //         await promptContext.context.sendActivity("Please enter a valid email address (e.g., user@example.com) or type 'Cancel' to exit.");
+    //         return false;
+    //     }
+
+    //     try {
+    //         // Call the API to check if the email is registered
+    //         const exists = await isEmailRegistered(email);
+
+    //         if (exists) {
+    //             return true; // Email is valid and registered
+    //         } else {
+    //             await promptContext.context.sendActivity("The email you entered is not registered. Please enter a registered email address or type 'Cancel' to exit.");
+    //             return false; // Email format is valid but not registered
+    //         }
+    //     } catch (error) {
+    //         // Handle API call failures gracefully
+    //         await promptContext.context.sendActivity("We're experiencing technical issues verifying your email. Please try again later.");
+    //         return false; // Depending on requirements, you might want to treat this differently
+    //     }
+    // }
     async emailValidator(promptContext) {
         const email = promptContext.recognized.value;
         console.log("Validating email:", email);
-        // Check for cancellation
+        
+        // If the user types "cancel", accept it.
         if (email.toLowerCase() === 'cancel') {
-            await promptContext.context.sendActivity("Order status tracking has been canceled.");
-            return false; // End dialog
+            return true;
         }
-
-        // First, validate the email format
+        
+        // Validate the email format
         if (!validator.isEmail(email)) {
-            await promptContext.context.sendActivity("Please enter a valid email address (e.g., user@example.com) or type 'Cancel' to exit.");
+            await promptContext.context.sendActivity(
+              "Please enter a valid email address (e.g., user@example.com) or type 'Cancel' to exit."
+            );
             return false;
         }
-
+    
         try {
-            // Call the API to check if the email is registered
+            // Check if the email is registered
             const exists = await isEmailRegistered(email);
-
             if (exists) {
-                return true; // Email is valid and registered
+                return true;
             } else {
-                await promptContext.context.sendActivity("The email you entered is not registered. Please enter a registered email address or type 'Cancel' to exit.");
-                return false; // Email format is valid but not registered
+                await promptContext.context.sendActivity(
+                  "The email you entered is not registered. Please enter a registered email address or type 'Cancel' to exit."
+                );
+                return false;
             }
         } catch (error) {
-            // Handle API call failures gracefully
-            await promptContext.context.sendActivity("We're experiencing technical issues verifying your email. Please try again later.");
-            return false; // Depending on requirements, you might want to treat this differently
+            await promptContext.context.sendActivity(
+              "We're experiencing technical issues verifying your email. Please try again later."
+            );
+            return false;
         }
     }
+    
 
     async nameValidator(promptContext) {
         const nameInput = promptContext.recognized.value;
