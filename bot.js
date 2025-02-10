@@ -156,8 +156,23 @@ class EchoBot extends ActivityHandler {
 
                // await this.TalkToAgentDialog.run(context, this.dialogState);
                 break;
+            case 'ChitChat':
+                await context.sendActivity("Hey there welcome to PersonalizedHealthRx! i am a virtual assistant, how can i help you today?");
+                await this.sendSuggestedActions(context);
+                break;
+            case 'Thanks':
+                await context.sendActivity("You're welcome! If you have any other questions, feel free to ask.");
+              await this.sendSuggestedActions(context);
+                break;
+            case 'Farewell':
+                await context.sendActivity("Hope i helped You today,Goodbye! Have a great day!");
+                await context.sendActivity("If anything there please come back to me");
+                break;
 
             case 'None':
+                await context.sendActivity("I'm sorry, I didn't understand that. Let me help you. Choose one of the options below.");
+                await this.sendSuggestedActions(context);
+                break;
             default:
                 // If no intent is recognized, or it is None, fallback to a default welcome message.
                 await context.sendActivity("I'm sorry, I didn't understand that. Let me help you. Choose one of the options below.");
