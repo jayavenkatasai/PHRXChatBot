@@ -86,7 +86,7 @@ async  getEmail(step){
     console.log("step value is")
     step.values.name = step.result;
     steps.name= step.result
-    return await step.prompt(EMAIL_PROMPT,'What is your Email?')
+    return await step.prompt(EMAIL_PROMPT,'What’s your email address?')
   
 }
 

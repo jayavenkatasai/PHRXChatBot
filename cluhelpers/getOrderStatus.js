@@ -9,10 +9,10 @@ const axios = require('axios');
 async function getorderStatus(email) {
     // Replace with your actual API endpoint and any required headers or parameters
     const apiUrl = `https://phrx-api.azurewebsites.net/api/shipmentdetails/GetOrderStatuesChat?Email=${email}`; // Example API endpoint
-
+    console.log("getting order status url")
     try {
         const response = await axios.post(apiUrl); // Changed from POST to GET as per the API URL
-
+        console.log("getting order status response: " + JSON.stringify(response.data))
         // Assuming the API returns an array of orders
         if (Array.isArray(response.data) && response.data.length > 0) {
             return response.data;
